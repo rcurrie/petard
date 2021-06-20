@@ -47,7 +47,7 @@ assert uni_weth_dai.functions.token0().call() == dai_address
 assert uni_weth_dai.functions.token1().call() == weth_address
 
 uni_reserves = uni_weth_dai.functions.getReserves().call()
-print(f"Uniswap WETH/DAI: {uni_reserves[0]/uni_reserves[1]}")
+uni_price = uni_reserves[0]/uni_reserves[1]
 
 # Sushi
 sushi_v2_factory = get_contract("0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac")
@@ -61,4 +61,15 @@ assert sushi_weth_dai.functions.token0().call() == dai_address
 assert sushi_weth_dai.functions.token1().call() == weth_address
 
 sushi_reserves = sushi_weth_dai.functions.getReserves().call()
-print(f"Sushi WETH/DAI: {sushi_reserves[0]/sushi_reserves[1]}")
+sushi_price = sushi_reserves[0]/sushi_reserves[1]
+
+# Arbitrage?
+should_start_eth = uni_price < sushi_price
+spread = abs((sushi_price / uni_price - 1) * 100) - 0.6
+
+ETH_TRADE = 10
+DAI_TRADE = 3500
+
+should_trade = spread > (
+        (ETH_TRADE if should_start_eth else DAI_TRADE)
+        / uni_reserves[(1 if should_start_eth else 0)])
