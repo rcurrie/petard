@@ -1,5 +1,8 @@
+cython
 requests
 python-dotenv
 web3
+
+pandas
 
 ipython

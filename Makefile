@@ -1,11 +1,18 @@
 init:
+	# neovim
+	sudo apt-get install -y silversearcher-ag
+	# python3
+	sudo apt-get install python3-dev
 	sudo apt install software-properties-common
 	sudo add-apt-repository ppa:deadsnakes/ppa
 	sudo apt-get install --upgrade python3.8
+	sudo apt-get install python3-venv
+	# venv
 	python3 -m venv venv
 	source venv/bin/activate
 	python3 -m pip install --upgrade pip
 	python3 -m pip install -r ~/requirements-nvim.txt
+	python3 -m pip install -r requirements.txt
 
 fetch-abis:
 	# uni v2 eth usdt
