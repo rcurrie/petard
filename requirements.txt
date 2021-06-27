@@ -1,8 +1,10 @@
 cython
 requests
+requests-cache
 python-dotenv
 web3
 
 pandas
+networkx
 
 ipython
