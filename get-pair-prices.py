@@ -3,27 +3,32 @@
 Identify triangle arbitrage oppertunities
 
 Arbitrage:
+https://cryptomarketpool.com/flash-loan-arbitrage-on-uniswap-and-sushiswap/
 https://python.plainenglish.io/crypto-arbitrage-with-networkx-and-python-638166e5a947
 
 Triangle Finding:
 https://stackoverflow.com/questions/54730863/how-to-get-triad-census-in-undirected-graph-using-networkx-in-python
 https://stackoverflow.com/questions/56537560/how-to-efficiently-calculate-triad-census-in-undirected-graph-in-python
+
+Pricing a swap:
+https://ethereum.stackexchange.com/questions/83701/how-to-infer-token-price-from-ethereum-blockchain-uniswap-data
+https://github.com/pedrobergamini/uni-sushi-flashloaner/blob/master/index.js#L50
 """
 import os
+import math
 import argparse
 import time
+from pprint import pprint
 import json
 import requests
 import requests_cache
 import dotenv
 from types import SimpleNamespace
 
-import pandas as pd
-
 from itertools import combinations
 import networkx as nx
 
-# from web3 import Web3
+from web3 import Web3
 
 NONE_ADDRESS = "0x0000000000000000000000000000000000000000"
 
@@ -76,7 +81,7 @@ def get_contract(web3, address):
         print("Waiting 5 seconds for etherscan rate limit...")
         time.sleep(5)
 
-    return web3.eth.contract(address=address, abi=abi)
+    return web3.eth.contract(address=web3.toChecksumAddress(address), abi=abi)
 
 
 def get_token(web3, address):
@@ -101,78 +106,59 @@ def get_uni_v2_reserves(web3, factory_address, token0_address, token1_address):
         return pair_contract.functions.getReserves().call()
 
 
-def arbitrage_scan(graph):
-    arb_checks = []
-
-    for c1, c2 in combinations(graph.nodes, 2):
-        print('paths from ', c1, 'to ', c2)
-        for path in nx.all_simple_paths(graph, c1, c2):
-
-            path_weight1 = 1
-            for i in range(len(path) - 1):
-                print(graph[path[i]][path[i+1]]['weight'])
-                path_weight1 *= graph[path[i]][path[i+1]]['weight']
-
-            print(f'weight for {path} is {path_weight1}')
-            path.reverse()
-
-            path_weight2 = 1
-            for i in range(len(path) - 1):
-                print(graph[path[i]][path[i+1]]['weight'])
-                path_weight2 *= graph[path[i]][path[i+1]]['weight']
-
-            print(f'weight for {path} is {path_weight2}')
-
-            factor = path_weight1 * path_weight2
-
-            arb_checks.append((path, factor))
-            print(f'path weights factor is: {factor}')
-
-    arb_checks = pd.DataFrame(arb_checks, columns=['Path', 'Result'])
-    return(arb_checks)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--num-pairs", type=int, default=20,
+    parser.add_argument("-n", "--num-pairs", type=int, default=50,
                         help="Number of pairs to examine")
     args = parser.parse_args()
 
-    print("Building graph...")
+    print(f"Building graph with {args.num_pairs} pairs...")
     graph = nx.Graph()
     pairs = get_pairs(args.num_pairs)
     for pair in pairs:
         graph.add_edge(pair.token0.symbol, pair.token1.symbol, address=pair.id)
+
     print("Finding triads...")
     triad_class = {}
     for nodes in combinations(graph.nodes, 3):
         n_edges = graph.subgraph(nodes).number_of_edges()
         triad_class.setdefault(n_edges, []).append(nodes)
-    # print(triad_class[3])
+    triads = triad_class[3]
+    print(f"Found {len(triads)} triads:")
+    pprint(triads)
 
-    for triad in triad_class[3]:
-        print(triad)
+    web3 = Web3(Web3.HTTPProvider(
+        "https://mainnet.infura.io/v3/ab17ea657036411d82e4245d47fc7382"))
 
+    # Prune tokens that are not bare ERC20
+    triads = [t for t in triads if "USDC" not in t]
 
-    # print("Building graph...")
-    # edges = []
-    # for pair in get_pairs(args.num_pairs):
-    #     edges.append((
-    #         pair.token0.symbol, pair.token1.symbol,
-    #         float(pair.token0Price) / float(pair.token1Price)))
-    #     # edges.append((
-    #     #     pair.token1.symbol, pair.token0.symbol,
-    #     #     float(pair.token1Price) / float(pair.token0Price)))
-    # graph = nx.DiGraph()
-    # graph.add_weighted_edges_from(edges)
-    # print(nx.triadic_census(graph))
-    # print("Finding triads...")
-    # triads = nx.triads_by_type(graph)["300"]
-    # for triad in triads:
-    #     print(list(triad))
+    for triad in triads:
+        print(f"Triad: {triad}")
+        pools = [
+            get_contract(web3, graph[triad[0]][triad[1]]["address"]),
+            get_contract(web3, graph[triad[1]][triad[2]]["address"]),
+            get_contract(web3, graph[triad[2]][triad[0]]["address"]),
+        ]
+        tokens = [
+            (
+                get_contract(
+                    web3,
+                    pool.functions.token0().call()).functions.symbol().call(),
+                get_contract(
+                    web3,
+                    pool.functions.token1().call()).functions.symbol().call())
+            for pool in pools]
+        print(tokens)
 
-    # web3 = Web3(Web3.HTTPProvider(
-    #     "https://mainnet.infura.io/v3/ab17ea657036411d82e4245d47fc7382"))
+        invert = [token != pair[0] for token, pair in zip(triad, tokens)]
+
+        reserves = [pool.functions.getReserves().call() for pool in pools]
+        weights = [r[1] / r[0] if i else r[0] / r[1]
+                   for r, i in zip(reserves, invert)]
+        print(weights)
+        print(f"Factor before fees and gas: {math.prod(weights)}")
+        print(f"Factor after fees: {math.prod(weights) * 1-.0003  * 1-.0003}")
 
     # uni_v2_factory_address = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
     # sushi_v2_factory_address = "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"
